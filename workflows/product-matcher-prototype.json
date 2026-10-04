@@ -1,0 +1,444 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "autobot",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2960,
+        208
+      ],
+      "id": "d4ffe9b5-7899-4dba-9cd5-9d043c67a0f7",
+      "name": "Webhook1",
+      "webhookId": "xxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "base64",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        -2560,
+        208
+      ],
+      "id": "712d9d0d-776c-487a-a0c0-de8b093203d6",
+      "name": "Convert to File2"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -2352,
+        208
+      ],
+      "id": "6c13a9ee-a83c-477b-a45f-8eff6ae546ce",
+      "name": "Extract from File1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MEDIA_API_URL || \"https://xxxxxxxxxxxxxxxxxxxx/chat/getBase64FromMediaMessage/xxxxxxxxxxxxxxxxxxxx\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": {{ JSON.stringify($('Webhook1').first().json.body.data) }},\n  \"convertToMp4\": false\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2768,
+        208
+      ],
+      "id": "c44f2fa6-aa9b-4b0a-b8ee-084b22adbdb8",
+      "name": "Pega arquivo em base"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        -2144,
+        208
+      ],
+      "id": "2e47e22d-1f40-4612-8451-38ecdc1b19f2",
+      "name": "Extrair pedido com IA",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "const entrada = $input.first().json;\n\n// Localiza o texto retornado pelo nó OpenAI\nconst resposta =\n  entrada.output?.[0]?.content?.[0]?.text\n  || entrada.output_text\n  || entrada.text\n  || entrada.message?.content\n  || '';\n\nif (!resposta) {\n  throw new Error('A resposta da IA não foi encontrada.');\n}\n\nlet texto = String(resposta).trim();\n\n// Remove marcações que eventualmente sejam retornadas pela IA\ntexto = texto\n  .replace(/^```json\\s*/i, '')\n  .replace(/^```\\s*/i, '')\n  .replace(/```$/i, '')\n  .trim();\n\nlet pedido;\n\ntry {\n  pedido = JSON.parse(texto);\n} catch (error) {\n  throw new Error(\n    `A IA não retornou um JSON válido. Erro: ${error.message}`\n  );\n}\n\nif (!pedido || typeof pedido !== 'object') {\n  throw new Error('O conteúdo retornado não representa um pedido válido.');\n}\n\nif (!Array.isArray(pedido.itens)) {\n  throw new Error('O campo \"itens\" não foi encontrado ou não é uma lista.');\n}\n\nif (pedido.itens.length === 0) {\n  throw new Error('Nenhum item foi identificado no pedido.');\n}\n\n// Gera um item do n8n para cada produto do pedido\nreturn pedido.itens.map((produto, indice) => ({\n  json: {\n    numero_pedido: pedido.numero_pedido ?? null,\n    cliente: pedido.cliente ?? null,\n    data_emissao: pedido.data_emissao ?? null,\n\n    item: produto.item ?? indice + 1,\n    codigo_cliente: produto.codigo_cliente ?? null,\n    descricao_original: String(\n      produto.descricao_original || ''\n    ).trim(),\n\n    quantidade: produto.quantidade ?? null,\n    unidade: produto.unidade ?? null,\n    ncm: produto.ncm ?? null,\n\n    marca: produto.marca ?? null,\n    modelo: produto.modelo ?? null,\n    produto_base: produto.produto_base ?? null,\n\n    volume: produto.volume ?? null,\n    peso: produto.peso ?? null,\n    dimensoes: produto.dimensoes ?? null,\n    concentracao: produto.concentracao ?? null,\n    cor: produto.cor ?? null,\n    material: produto.material ?? null,\n\n    quantidade_embalagem:\n      produto.quantidade_embalagem ?? null,\n\n    atributos: Array.isArray(produto.atributos)\n      ? produto.atributos\n      : [],\n  },\n  pairedItem: {\n    item: 0,\n  },\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1792,
+        208
+      ],
+      "id": "dfdb76e9-e983-43dc-a2ca-93657e9871fe",
+      "name": "Separar itens do pedido"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function removerAcentos(texto) {\n  return String(texto || '')\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '');\n}\n\nfunction normalizarTexto(texto) {\n  return removerAcentos(texto)\n    .toUpperCase()\n    .replace(/,/g, '.')\n    .replace(/[^A-Z0-9.%/°º²µX\\- ]/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction normalizarUnidadeMedida(unidade) {\n  const valor = normalizarTexto(unidade);\n\n  const equivalencias = {\n    UN: 'UNIDADE',\n    UND: 'UNIDADE',\n    UNID: 'UNIDADE',\n    UNIDADE: 'UNIDADE',\n\n    CX: 'CAIXA',\n    CAIX: 'CAIXA',\n    CAIXA: 'CAIXA',\n\n    PC: 'PACOTE',\n    PCT: 'PACOTE',\n    PAC: 'PACOTE',\n    PACOTE: 'PACOTE',\n\n    FD: 'FARDO',\n    FARDO: 'FARDO',\n\n    GL: 'GALAO',\n    GALA: 'GALAO',\n    GALAO: 'GALAO',\n\n    KG: 'QUILOGRAMA',\n    QUILOGRAMA: 'QUILOGRAMA',\n\n    LT: 'LITRO',\n    L: 'LITRO',\n    LITRO: 'LITRO',\n\n    RS: 'RESMA',\n    RESMA: 'RESMA'\n  };\n\n  return equivalencias[valor] || valor || null;\n}\n\nfunction extrairMedidas(texto) {\n  const normalizado = normalizarTexto(texto);\n\n  const medidas = normalizado.match(\n    /\\d+(?:\\.\\d+)?\\s*(?:ML|L|G|KG|MM|CM|M|UN|V|%)/g\n  ) || [];\n\n  return [...new Set(\n    medidas.map(medida => medida.replace(/\\s+/g, ''))\n  )];\n}\n\nfunction normalizarAtributos(atributos) {\n  if (!Array.isArray(atributos)) {\n    return [];\n  }\n\n  return [...new Set(\n    atributos\n      .map(normalizarTexto)\n      .filter(Boolean)\n  )];\n}\n\nconst descricaoOriginal = String(\n  $json.descricao_original || ''\n).trim();\n\nif (!descricaoOriginal) {\n  throw new Error(\n    `Descrição vazia no item ${$json.item ?? 'desconhecido'}.`\n  );\n}\n\nconst descricaoNormalizada =\n  normalizarTexto(descricaoOriginal);\n\nconst produtoBaseNormalizado =\n  normalizarTexto($json.produto_base);\n\nconst volumeNormalizado =\n  normalizarTexto($json.volume);\n\nconst pesoNormalizado =\n  normalizarTexto($json.peso);\n\nconst dimensoesNormalizadas =\n  normalizarTexto($json.dimensoes);\n\nconst concentracaoNormalizada =\n  normalizarTexto($json.concentracao);\n\nconst corNormalizada =\n  normalizarTexto($json.cor);\n\nconst materialNormalizado =\n  normalizarTexto($json.material);\n\nconst marcaNormalizada =\n  normalizarTexto($json.marca);\n\nconst modeloNormalizado =\n  normalizarTexto($json.modelo);\n\nconst atributosNormalizados =\n  normalizarAtributos($json.atributos);\n\nconst medidasEncontradas = extrairMedidas(\n  [\n    descricaoOriginal,\n    $json.volume,\n    $json.peso,\n    $json.dimensoes,\n    $json.concentracao,\n    ...(Array.isArray($json.atributos)\n      ? $json.atributos\n      : [])\n  ].join(' ')\n);\n\nreturn {\n  ...$json,\n\n  unidade_normalizada:\n    normalizarUnidadeMedida($json.unidade),\n\n  descricao_normalizada:\n    descricaoNormalizada,\n\n  produto_base_normalizado:\n    produtoBaseNormalizado,\n\n  volume_normalizado:\n    volumeNormalizado || null,\n\n  peso_normalizado:\n    pesoNormalizado || null,\n\n  dimensoes_normalizadas:\n    dimensoesNormalizadas || null,\n\n  concentracao_normalizada:\n    concentracaoNormalizada || null,\n\n  cor_normalizada:\n    corNormalizada || null,\n\n  material_normalizado:\n    materialNormalizado || null,\n\n  marca_normalizada:\n    marcaNormalizada || null,\n\n  modelo_normalizado:\n    modeloNormalizado || null,\n\n  atributos_normalizados:\n    atributosNormalizados,\n\n  medidas_encontradas:\n    medidasEncontradas\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1584,
+        208
+      ],
+      "id": "6d6609ed-8532-45ff-9ef0-77aaafd148ef",
+      "name": "Normalizar produto solicitado"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const palavrasIgnoradas = new Set([\n  'DE', 'DA', 'DO', 'DAS', 'DOS',\n  'PARA', 'COM', 'SEM', 'POR',\n  'EM', 'E', 'A', 'O',\n  'TIPO', 'MATERIAL', 'COR',\n  'CARACTER', 'CARACTERISTICO',\n  'FABRICANTE', 'FORNECIMENTO',\n  'EMBALAGEM', 'MODELO'\n]);\n\nfunction palavrasValidas(texto) {\n  return String(texto || '')\n    .split(/\\s+/)\n    .map(palavra => palavra.trim())\n    .filter(palavra =>\n      palavra.length >= 2 &&\n      !palavrasIgnoradas.has(palavra)\n    );\n}\n\nfunction termosUnicos(lista) {\n  return [...new Set(\n    lista\n      .map(valor => String(valor || '').trim())\n      .filter(Boolean)\n  )];\n}\n\nconst produtoBase = String(\n  $json.produto_base_normalizado || ''\n).trim();\n\nconst descricao = String(\n  $json.descricao_normalizada || ''\n).trim();\n\nif (!produtoBase) {\n  throw new Error(\n    `Produto-base não encontrado no item ${$json.item}.`\n  );\n}\n\n// Termos principais do nome do produto\nconst termosProdutoBase = palavrasValidas(produtoBase);\n\n// Características que ajudam a diferenciar produtos parecidos\nconst termosTecnicos = termosUnicos([\n  $json.volume_normalizado,\n  $json.peso_normalizado,\n  $json.dimensoes_normalizadas,\n  $json.concentracao_normalizada,\n  $json.cor_normalizada,\n  $json.material_normalizado,\n  $json.marca_normalizada,\n  $json.modelo_normalizado,\n  ...(Array.isArray($json.atributos_normalizados)\n    ? $json.atributos_normalizados\n    : []),\n  ...(Array.isArray($json.medidas_encontradas)\n    ? $json.medidas_encontradas\n    : [])\n]);\n\n// Termos usados para recuperação ampla no Oracle\nconst termosBusca = termosUnicos([\n  ...termosProdutoBase,\n  ...termosTecnicos\n]);\n\n// Limita apenas para evitar uma consulta excessivamente grande.\n// Os termos mais importantes continuam vindo primeiro.\nconst termosLimitados = termosBusca.slice(0, 12);\n\nreturn {\n  ...$json,\n\n  termo_produto_1: termosProdutoBase[0] || '',\n  termo_produto_2: termosProdutoBase[1] || '',\n  termo_produto_3: termosProdutoBase[2] || '',\n\n  termo_tecnico_1: termosTecnicos[0] || '',\n  termo_tecnico_2: termosTecnicos[1] || '',\n  termo_tecnico_3: termosTecnicos[2] || '',\n  termo_tecnico_4: termosTecnicos[3] || '',\n  termo_tecnico_5: termosTecnicos[4] || '',\n\n  termos_busca: termosLimitados,\n\n  texto_busca_completo: termosLimitados.join(' '),\n\n  quantidade_termos_busca: termosLimitados.length\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1376,
+        208
+      ],
+      "id": "2cea6dd7-7519-4d7e-899c-95a0a6329b15",
+      "name": "Preparar busca no banco"
+    },
+    {
+      "parameters": {
+        "operation": "execute",
+        "query": "SELECT\n    R.ITEM_PEDIDO,\n    R.DESCRICAO_ORIGINAL,\n    R.CODPROD,\n    R.DESCRICAO,\n    R.SIMILARIDADE,\n    R.PONTOS_TERMOS\nFROM (\n    SELECT\n        {{ Number($json.item || 0) }}\n            AS ITEM_PEDIDO,\n\n        '{{ String($json.descricao_original || '').replace(/'/g, \"''\") }}'\n            AS DESCRICAO_ORIGINAL,\n\n        P.CODPROD,\n        P.DESCRICAO,\n\n        UTL_MATCH.JARO_WINKLER_SIMILARITY(\n            P.DESCRICAO_NORMALIZADA,\n\n            UPPER(\n                TRANSLATE(\n                    '{{ String($json.descricao_normalizada || $json.descricao_original || '').replace(/'/g, \"''\") }}',\n                    'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ',\n                    'AAAAAEEEEIIIIOOOOOUUUUC'\n                )\n            )\n        ) AS SIMILARIDADE,\n\n        (\n            /*\n             * Produto-base completo.\n             * Exemplo: AGUA SANITARIA.\n             */\n            CASE\n                WHEN\n                    '{{ String($json.produto_base_normalizado || $json.produto_base || '').replace(/'/g, \"''\") }}'\n                        IS NOT NULL\n\n                    AND P.DESCRICAO_NORMALIZADA LIKE\n                        '%' ||\n                        '{{ String($json.produto_base_normalizado || $json.produto_base || '').replace(/'/g, \"''\") }}'\n                        || '%'\n\n                THEN 100\n                ELSE 0\n            END\n\n            +\n\n            /*\n             * Primeiro termo principal.\n             */\n            CASE\n                WHEN\n                    '{{ String($json.termo_produto_1 || '').replace(/'/g, \"''\") }}'\n                        IS NOT NULL\n\n                    AND P.DESCRICAO_NORMALIZADA LIKE\n                        '%' ||\n                        '{{ String($json.termo_produto_1 || '').replace(/'/g, \"''\") }}'\n                        || '%'\n\n                THEN 40\n                ELSE 0\n            END\n\n            +\n\n            /*\n             * Segundo termo principal.\n             */\n            CASE\n                WHEN\n                    '{{ String($json.termo_produto_2 || '').replace(/'/g, \"''\") }}'\n                        IS NOT NULL\n\n                    AND P.DESCRICAO_NORMALIZADA LIKE\n                        '%' ||\n                        '{{ String($json.termo_produto_2 || '').replace(/'/g, \"''\") }}'\n                        || '%'\n\n                THEN 30\n                ELSE 0\n            END\n\n            +\n\n            /*\n             * Terceiro termo principal.\n             */\n            CASE\n                WHEN\n                    '{{ String($json.termo_produto_3 || '').replace(/'/g, \"''\") }}'\n                        IS NOT NULL\n\n                    AND P.DESCRICAO_NORMALIZADA LIKE\n                        '%' ||\n                        '{{ String($json.termo_produto_3 || '').replace(/'/g, \"''\") }}'\n                        || '%'\n\n                THEN 20\n                ELSE 0\n            END\n\n            +\n\n            /*\n             * Bônus: primeiro e segundo termos encontrados.\n             */\n            CASE\n                WHEN\n                    '{{ String($json.termo_produto_1 || '').replace(/'/g, \"''\") }}'\n                        IS NOT NULL\n\n                    AND\n                    '{{ String($json.termo_produto_2 || '').replace(/'/g, \"''\") }}'\n                        IS NOT NULL\n\n                    AND P.DESCRICAO_NORMALIZADA LIKE\n                        '%' ||\n                        '{{ String($json.termo_produto_1 || '').replace(/'/g, \"''\") }}'\n                        || '%'\n\n                    AND P.DESCRICAO_NORMALIZADA LIKE\n                        '%' ||\n                        '{{ String($json.termo_produto_2 || '').replace(/'/g, \"''\") }}'\n                        || '%'\n\n                THEN 35\n                ELSE 0\n            END\n\n            +\n\n            /*\n             * Bônus: primeiro e terceiro termos encontrados.\n             */\n            CASE\n                WHEN\n                    '{{ String($json.termo_produto_1 || '').replace(/'/g, \"''\") }}'\n                        IS NOT NULL\n\n                    AND\n                    '{{ String($json.termo_produto_3 || '').replace(/'/g, \"''\") }}'\n                        IS NOT NULL\n\n                    AND P.DESCRICAO_NORMALIZADA LIKE\n                        '%' ||\n                        '{{ String($json.termo_produto_1 || '').replace(/'/g, \"''\") }}'\n                        || '%'\n\n                    AND P.DESCRICAO_NORMALIZADA LIKE\n                        '%' ||\n                        '{{ String($json.termo_produto_3 || '').replace(/'/g, \"''\") }}'\n                        || '%'\n\n                THEN 20\n                ELSE 0\n            END\n\n            +\n\n            /*\n             * Bônus: segundo e terceiro termos encontrados.\n             */\n            CASE\n                WHEN\n                    '{{ String($json.termo_produto_2 || '').replace(/'/g, \"''\") }}'\n                        IS NOT NULL\n\n                    AND\n                    '{{ String($json.termo_produto_3 || '').replace(/'/g, \"''\") }}'\n                        IS NOT NULL\n\n                    AND P.DESCRICAO_NORMALIZADA LIKE\n                        '%' ||\n                        '{{ String($json.termo_produto_2 || '').replace(/'/g, \"''\") }}'\n                        || '%'\n\n                    AND P.DESCRICAO_NORMALIZADA LIKE\n                        '%' ||\n                        '{{ String($json.termo_produto_3 || '').replace(/'/g, \"''\") }}'\n                        || '%'\n\n                THEN 15\n                ELSE 0\n            END\n        ) AS PONTOS_TERMOS\n\n    FROM (\n        SELECT\n            PROD.CODPROD,\n            PROD.DESCRICAO,\n\n            UPPER(\n                TRANSLATE(\n                    PROD.DESCRICAO,\n                    'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ',\n                    'AAAAAEEEEIIIIOOOOOUUUUC'\n                )\n            ) AS DESCRICAO_NORMALIZADA\n\n        FROM PCPRODUT PROD\n\n        WHERE PROD.DTEXCLUSAO IS NULL\n    ) P\n\n    WHERE\n        (\n            /*\n             * Produto-base completo.\n             */\n            (\n                '{{ String($json.produto_base_normalizado || $json.produto_base || '').replace(/'/g, \"''\") }}'\n                    IS NOT NULL\n\n                AND P.DESCRICAO_NORMALIZADA LIKE\n                    '%' ||\n                    '{{ String($json.produto_base_normalizado || $json.produto_base || '').replace(/'/g, \"''\") }}'\n                    || '%'\n            )\n\n            OR\n\n            /*\n             * Primeiro termo.\n             */\n            (\n                '{{ String($json.termo_produto_1 || '').replace(/'/g, \"''\") }}'\n                    IS NOT NULL\n\n                AND P.DESCRICAO_NORMALIZADA LIKE\n                    '%' ||\n                    '{{ String($json.termo_produto_1 || '').replace(/'/g, \"''\") }}'\n                    || '%'\n            )\n\n            OR\n\n            /*\n             * Segundo termo.\n             */\n            (\n                '{{ String($json.termo_produto_2 || '').replace(/'/g, \"''\") }}'\n                    IS NOT NULL\n\n                AND P.DESCRICAO_NORMALIZADA LIKE\n                    '%' ||\n                    '{{ String($json.termo_produto_2 || '').replace(/'/g, \"''\") }}'\n                    || '%'\n            )\n\n            OR\n\n            /*\n             * Terceiro termo.\n             */\n            (\n                '{{ String($json.termo_produto_3 || '').replace(/'/g, \"''\") }}'\n                    IS NOT NULL\n\n                AND P.DESCRICAO_NORMALIZADA LIKE\n                    '%' ||\n                    '{{ String($json.termo_produto_3 || '').replace(/'/g, \"''\") }}'\n                    || '%'\n            )\n        )\n\n    ORDER BY\n        PONTOS_TERMOS DESC,\n        SIMILARIDADE DESC,\n        P.CODPROD\n) R\n\nWHERE ROWNUM <= 50",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.oracleDatabase",
+      "typeVersion": 1,
+      "position": [
+        -1168,
+        208
+      ],
+      "id": "9f99f3fb-9abd-4aff-b96a-b4741ce9c18c",
+      "name": "Buscar candidatos no Oracle",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Todos os produtos solicitados antes da consulta ao Oracle\nconst produtosSolicitados =\n  $('Preparar busca no banco').all().map(item => item.json);\n\n// Todas as linhas retornadas pelo Oracle\nconst linhasOracle = $input.all().map(item => item.json);\n\n// Agrupa os candidatos pelo número do item do pedido\nconst candidatosPorItem = new Map();\n\nfor (const linha of linhasOracle) {\n  const numeroItem = Number(linha.ITEM_PEDIDO || 0);\n\n  if (!numeroItem) {\n    continue;\n  }\n\n  if (!candidatosPorItem.has(numeroItem)) {\n    candidatosPorItem.set(numeroItem, []);\n  }\n\n  candidatosPorItem.get(numeroItem).push({\n    codigo: linha.CODPROD ?? null,\n    descricao: String(linha.DESCRICAO || '').trim(),\n    similaridade: Number(linha.SIMILARIDADE || 0),\n    pontos_termos: Number(linha.PONTOS_TERMOS || 0),\n  });\n}\n\n// Gera novamente um item para cada produto solicitado,\n// inclusive quando o Oracle não encontrou candidatos\nreturn produtosSolicitados.map(produto => {\n  const numeroItem = Number(produto.item || 0);\n\n  const candidatos = candidatosPorItem.get(numeroItem) || [];\n\n  // Remove códigos duplicados\n  const candidatosUnicos = [\n    ...new Map(\n      candidatos.map(candidato => [\n        String(candidato.codigo),\n        candidato,\n      ])\n    ).values(),\n  ];\n\n  // Ordena primeiro pela pontuação dos termos\n  // e depois pela similaridade textual\n  candidatosUnicos.sort((a, b) => {\n    if (b.pontos_termos !== a.pontos_termos) {\n      return b.pontos_termos - a.pontos_termos;\n    }\n\n    return b.similaridade - a.similaridade;\n  });\n\n  // Mantém somente os 10 melhores\n  const melhoresCandidatos = candidatosUnicos.slice(0, 50);\n\n  return {\n    json: {\n      numero_pedido: produto.numero_pedido ?? null,\n      cliente: produto.cliente ?? null,\n      data_emissao: produto.data_emissao ?? null,\n\n      item: produto.item ?? null,\n      codigo_cliente: produto.codigo_cliente ?? null,\n      descricao_original: produto.descricao_original ?? '',\n      quantidade: produto.quantidade ?? null,\n      unidade: produto.unidade ?? null,\n      unidade_normalizada:\n        produto.unidade_normalizada ?? null,\n      ncm: produto.ncm ?? null,\n\n      produto_base:\n        produto.produto_base ?? null,\n      produto_base_normalizado:\n        produto.produto_base_normalizado ?? null,\n\n      volume: produto.volume ?? null,\n      peso: produto.peso ?? null,\n      dimensoes: produto.dimensoes ?? null,\n      concentracao: produto.concentracao ?? null,\n      cor: produto.cor ?? null,\n      material: produto.material ?? null,\n      marca: produto.marca ?? null,\n      modelo: produto.modelo ?? null,\n\n      quantidade_embalagem:\n        produto.quantidade_embalagem ?? null,\n\n      atributos: produto.atributos ?? [],\n      medidas_encontradas:\n        produto.medidas_encontradas ?? [],\n\n      quantidade_candidatos:\n        melhoresCandidatos.length,\n\n      candidatos: melhoresCandidatos,\n\n      nenhum_candidato:\n        melhoresCandidatos.length === 0,\n    },\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        208
+      ],
+      "id": "85e5828c-55ca-44f4-9b6d-fc966a300021",
+      "name": "Agrupar candidatos por item"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function normalizar(texto) {\n  return String(texto || '')\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '')\n    .toUpperCase()\n    .replace(/,/g, '.')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction numero(valor) {\n  return Number(\n    String(valor || '')\n      .replace(',', '.')\n      .trim()\n  );\n}\n\nfunction valoresIguaisComTolerancia(\n  valorA,\n  valorB,\n  tolerancia = 0.001\n) {\n  return (\n    Math.abs(Number(valorA) - Number(valorB)) <=\n    tolerancia\n  );\n}\n\nfunction possuiIntersecaoNumerica(listaA, listaB) {\n  return listaA.some(valorA =>\n    listaB.some(valorB =>\n      valoresIguaisComTolerancia(valorA, valorB)\n    )\n  );\n}\n\nfunction valoresUnicos(lista) {\n  return [\n    ...new Set(\n      lista.filter(valor => Number.isFinite(valor))\n    ),\n  ];\n}\n\n/**\n * Converte:\n *\n * volume      → mililitros\n * peso        → gramas\n * comprimento → milímetros\n */\nfunction extrairMedidas(texto) {\n  let valor = normalizar(texto);\n\n  /*\n   * Padroniza unidades que aparecem grudadas no número:\n   *\n   * 400GRS → 400 G\n   * 500GR  → 500 G\n   * 05KG   → 05 KG\n   * 5LT    → 5 L\n   * 500ML  → 500 ML\n   */\n  valor = valor\n    .replace(/(\\d)\\s*LITROS?\\b/g, '$1 L ')\n    .replace(/(\\d)\\s*LTS?\\b/g, '$1 L ')\n    .replace(/(\\d)\\s*LT\\b/g, '$1 L ')\n\n    .replace(/(\\d)\\s*KILOS?\\b/g, '$1 KG ')\n    .replace(/(\\d)\\s*QUILOS?\\b/g, '$1 KG ')\n    .replace(/(\\d)\\s*KGS?\\b/g, '$1 KG ')\n\n    .replace(/(\\d)\\s*GRAMAS?\\b/g, '$1 G ')\n    .replace(/(\\d)\\s*GRS?\\b/g, '$1 G ')\n    .replace(/(\\d)\\s*GR\\b/g, '$1 G ')\n\n    .replace(/(\\d)\\s*MLS?\\b/g, '$1 ML ')\n\n    .replace(\n      /(\\d)\\s*CENTIMETROS?\\b/g,\n      '$1 CM '\n    )\n    .replace(\n      /(\\d)\\s*MILIMETROS?\\b/g,\n      '$1 MM '\n    )\n    .replace(/(\\d)\\s*METROS?\\b/g, '$1 M ')\n\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  const resultado = {\n    volumes_ml: [],\n    pesos_g: [],\n    comprimentos_mm: [],\n    percentuais: [],\n    voltagens: [],\n    quantidades_un: [],\n  };\n\n  function adicionar(lista, valorNumerico) {\n    if (Number.isFinite(valorNumerico)) {\n      lista.push(valorNumerico);\n    }\n  }\n\n  /*\n   * Dimensões compostas:\n   *\n   * 100X125X25MM\n   * 22X20.7CM\n   * 35X17CM\n   * 0.20X200M\n   */\n  const regexDimensoes =\n    /(\\d+(?:\\.\\d+)?(?:\\s*X\\s*\\d+(?:\\.\\d+)?)+)\\s*(MM|CM|M)\\b/g;\n\n  let match;\n\n  while ((match = regexDimensoes.exec(valor)) !== null) {\n    const partes = match[1]\n      .split(/\\s*X\\s*/)\n      .map(Number)\n      .filter(Number.isFinite);\n\n    const unidade = match[2];\n\n    const fator =\n      unidade === 'MM'\n        ? 1\n        : unidade === 'CM'\n          ? 10\n          : 1000;\n\n    for (const parte of partes) {\n      adicionar(\n        resultado.comprimentos_mm,\n        parte * fator\n      );\n    }\n  }\n\n  /*\n   * Remove as dimensões compostas para evitar\n   * contabilização duplicada.\n   */\n  const textoSemDimensoes = valor.replace(\n    regexDimensoes,\n    ' '\n  );\n\n  const regexMedidas =\n    /(\\d+(?:\\.\\d+)?)\\s*(ML|L|KG|G|MM|CM|M|%|V|UN)\\b/g;\n\n  while (\n    (match = regexMedidas.exec(textoSemDimensoes)) !==\n    null\n  ) {\n    const quantidade = numero(match[1]);\n    const unidade = match[2];\n\n    if (!Number.isFinite(quantidade)) {\n      continue;\n    }\n\n    switch (unidade) {\n      case 'ML':\n        adicionar(\n          resultado.volumes_ml,\n          quantidade\n        );\n        break;\n\n      case 'L':\n        adicionar(\n          resultado.volumes_ml,\n          quantidade * 1000\n        );\n        break;\n\n      case 'G':\n        adicionar(\n          resultado.pesos_g,\n          quantidade\n        );\n        break;\n\n      case 'KG':\n        adicionar(\n          resultado.pesos_g,\n          quantidade * 1000\n        );\n        break;\n\n      case 'MM':\n        adicionar(\n          resultado.comprimentos_mm,\n          quantidade\n        );\n        break;\n\n      case 'CM':\n        adicionar(\n          resultado.comprimentos_mm,\n          quantidade * 10\n        );\n        break;\n\n      case 'M':\n        adicionar(\n          resultado.comprimentos_mm,\n          quantidade * 1000\n        );\n        break;\n\n      case '%':\n        adicionar(\n          resultado.percentuais,\n          quantidade\n        );\n        break;\n\n      case 'V':\n        adicionar(\n          resultado.voltagens,\n          quantidade\n        );\n        break;\n\n      case 'UN':\n        adicionar(\n          resultado.quantidades_un,\n          quantidade\n        );\n        break;\n    }\n  }\n\n  resultado.volumes_ml =\n    valoresUnicos(resultado.volumes_ml);\n\n  resultado.pesos_g =\n    valoresUnicos(resultado.pesos_g);\n\n  resultado.comprimentos_mm =\n    valoresUnicos(resultado.comprimentos_mm);\n\n  resultado.percentuais =\n    valoresUnicos(resultado.percentuais);\n\n  resultado.voltagens =\n    valoresUnicos(resultado.voltagens);\n\n  resultado.quantidades_un =\n    valoresUnicos(resultado.quantidades_un);\n\n  return resultado;\n}\n\nfunction verificarMedidaObrigatoria(\n  nome,\n  valoresSolicitados,\n  valoresCandidato,\n  conflitos,\n  naoConfirmados\n) {\n  if (valoresSolicitados.length === 0) {\n    return;\n  }\n\n  if (valoresCandidato.length === 0) {\n    naoConfirmados.push(\n      `${nome} não identificado na descrição do candidato`\n    );\n    return;\n  }\n\n  if (\n    !possuiIntersecaoNumerica(\n      valoresSolicitados,\n      valoresCandidato\n    )\n  ) {\n    conflitos.push(\n      `${nome} incompatível: solicitado ${valoresSolicitados.join(', ')}; candidato ${valoresCandidato.join(', ')}`\n    );\n  }\n}\n\nfunction detectarTipoPilha(texto) {\n  const valor = normalizar(texto);\n\n  /*\n   * AAA precisa ser verificado antes de AA.\n   * Também aceita descrições como AAAC/2.\n   */\n  if (\n    /(^|[^A-Z])AAA([^A-Z]|$)/.test(valor) ||\n    valor.includes('PAL.AAA') ||\n    valor.includes('PAL AAA') ||\n    valor.includes('AAA C/')\n  ) {\n    return 'AAA';\n  }\n\n  if (\n    /(^|[^A-Z])AA([^A-Z]|$)/.test(valor) ||\n    valor.includes('PEQ.AA') ||\n    valor.includes('PEQ AA') ||\n    valor.includes('AA C/')\n  ) {\n    return 'AA';\n  }\n\n  return null;\n}\n\nfunction detectarFolha(texto) {\n  const valor = normalizar(texto);\n\n  if (\n    valor.includes('FOLHA DUPLA') ||\n    valor.includes('FL DUPLA')\n  ) {\n    return 'DUPLA';\n  }\n\n  if (\n    valor.includes('FOLHA SIMPLES') ||\n    valor.includes('FL SIMPLES')\n  ) {\n    return 'SIMPLES';\n  }\n\n  return null;\n}\n\nfunction detectarPff(texto) {\n  const valor = normalizar(texto);\n\n  const match =\n    valor.match(/\\bPFF\\s*([123])\\b/) ||\n    valor.match(/\\bPFF-([123])\\b/);\n\n  return match ? `PFF${match[1]}` : null;\n}\n\nfunction detectarTamanhoGrampo(texto) {\n  const valor = normalizar(texto);\n\n  const match = valor.match(\n    /\\b(\\d{1,2}\\/\\d)\\b/\n  );\n\n  return match ? match[1] : null;\n}\n\nfunction detectarQuantidadeEmbalagem(texto) {\n  const valor = normalizar(texto);\n\n  /*\n   * Somente padrões que indicam quantidade física\n   * de unidades, folhas, rolos ou peças.\n   *\n   * Não interpreta:\n   * C/500 GRS\n   * C/1000 ML\n   * C/5 KG\n   */\n  const padroes = [\n    /\\bC\\/\\s*(\\d+)\\s*UN\\b/,\n    /\\bC\\/(\\d+)\\s*UN\\b/,\n    /\\bCX\\s*C\\/\\s*(\\d+)\\s*UN\\b/,\n    /\\bPACOTE\\s*C\\/\\s*(\\d+)\\s*UN\\b/,\n    /\\bPC\\s*C\\/\\s*(\\d+)\\s*UN\\b/,\n\n    /\\bC\\/\\s*(\\d+)\\s*FLS?\\b/,\n    /\\bC\\/\\s*(\\d+)\\s*FL\\b/,\n    /\\b(\\d+)\\s*FLS?\\b/,\n    /\\b(\\d+)\\s*FL\\b/,\n\n    /\\bC\\/\\s*(\\d+)\\s*RLS?\\b/,\n    /\\bC\\/\\s*(\\d+)\\s*ROLOS?\\b/,\n\n    /\\b(\\d+)\\s*UN\\b/,\n  ];\n\n  for (const padrao of padroes) {\n    const match = valor.match(padrao);\n\n    if (match) {\n      const quantidade = Number(match[1]);\n\n      return Number.isFinite(quantidade)\n        ? quantidade\n        : null;\n    }\n  }\n\n  return null;\n}\n\nfunction detectarDigitosCalculadora(texto) {\n  const valor = normalizar(texto);\n\n  const match =\n    valor.match(/\\b(\\d{1,2})\\s*DIG\\b/) ||\n    valor.match(/\\b(\\d{1,2})\\s*DIGITOS?\\b/);\n\n  return match ? Number(match[1]) : null;\n}\n\nfunction detectarTamanhoRegua(texto) {\n  const valor = normalizar(texto);\n\n  if (!valor.includes('REGUA')) {\n    return null;\n  }\n\n  const match = valor.match(\n    /\\b(\\d+(?:\\.\\d+)?)\\s*CM\\b/\n  );\n\n  return match ? Number(match[1]) : null;\n}\n\nfunction detectarProdutoPortaPapel(texto) {\n  const valor = normalizar(texto);\n\n  return (\n    valor.includes('PORTA PAPEL') ||\n    valor.includes('DISPENSER PAPEL') ||\n    valor.includes('DISPENSADOR PAPEL')\n  );\n}\n\nfunction detectarMarcadorCd(texto) {\n  const valor = normalizar(texto);\n\n  return (\n    valor.includes('MARCADOR CD') ||\n    valor.includes('MARCADOR DVD') ||\n    valor.includes('CD/DVD') ||\n    valor.includes('CD / DVD')\n  );\n}\n\nfunction detectarMarcaTexto(texto) {\n  const valor = normalizar(texto);\n\n  return (\n    valor.includes('MARCA TEXTO') ||\n    valor.includes('MARCA-TEXTO')\n  );\n}\n\nfunction detectarLapis(texto) {\n  const valor = normalizar(texto);\n\n  return /\\bLAPIS\\b/.test(valor);\n}\n\nfunction detectarLapiseira(texto) {\n  const valor = normalizar(texto);\n\n  return /\\bLAPISEIRA\\b/.test(valor);\n}\n\nfunction detectarColaBastao(texto) {\n  const valor = normalizar(texto);\n\n  return (\n    valor.includes('COLA') &&\n    valor.includes('BASTAO')\n  );\n}\n\nfunction detectarPapelEscolar(texto) {\n  const valor = normalizar(texto);\n\n  return (\n    valor.includes('PAPEL ESCOLAR') ||\n    valor.includes('PAPEL COLORIDO')\n  );\n}\n\nconst descricaoSolicitada = normalizar(\n  $json.descricao_original\n);\n\nconst medidasSolicitadas = extrairMedidas(\n  [\n    $json.descricao_original,\n    $json.volume,\n    $json.peso,\n    $json.dimensoes,\n    $json.concentracao,\n    ...(Array.isArray($json.atributos)\n      ? $json.atributos\n      : []),\n  ].join(' ')\n);\n\nconst tipoPilhaSolicitado =\n  detectarTipoPilha(descricaoSolicitada);\n\nconst folhaSolicitada =\n  detectarFolha(descricaoSolicitada);\n\nconst pffSolicitado =\n  detectarPff(descricaoSolicitada);\n\nconst grampoSolicitado =\n  detectarTamanhoGrampo(descricaoSolicitada);\n\nconst quantidadeEmbalagemSolicitada =\n  Number($json.quantidade_embalagem || 0) ||\n  detectarQuantidadeEmbalagem(\n    descricaoSolicitada\n  );\n\nconst digitosCalculadoraSolicitada =\n  detectarDigitosCalculadora(\n    descricaoSolicitada\n  );\n\nconst tamanhoReguaSolicitado =\n  detectarTamanhoRegua(descricaoSolicitada);\n\nconst solicitadoEhPortaPapel =\n  detectarProdutoPortaPapel(\n    descricaoSolicitada\n  );\n\nconst solicitadoEhMarcaTexto =\n  detectarMarcaTexto(descricaoSolicitada);\n\nconst solicitadoEhMarcadorCd =\n  detectarMarcadorCd(descricaoSolicitada);\n\nconst solicitadoEhLapis =\n  detectarLapis(descricaoSolicitada);\n\nconst solicitadoEhLapiseira =\n  detectarLapiseira(descricaoSolicitada);\n\nconst solicitadoEhColaBastao =\n  detectarColaBastao(descricaoSolicitada);\n\nconst solicitadoEhPapelEscolar =\n  detectarPapelEscolar(\n    descricaoSolicitada\n  );\n\nconst quantidadeSolicitada = Number(\n  $json.quantidade || 0\n);\n\nconst candidatos = Array.isArray(\n  $json.candidatos\n)\n  ? $json.candidatos\n  : [];\n\nconst candidatosValidados = candidatos.map(\n  candidato => {\n    const descricaoCandidato = normalizar(\n      candidato.descricao\n    );\n\n    const medidasCandidato =\n      extrairMedidas(descricaoCandidato);\n\n    const conflitos = [];\n    const atributosNaoConfirmados = [];\n\n    verificarMedidaObrigatoria(\n      'volume',\n      medidasSolicitadas.volumes_ml,\n      medidasCandidato.volumes_ml,\n      conflitos,\n      atributosNaoConfirmados\n    );\n\n    verificarMedidaObrigatoria(\n      'peso',\n      medidasSolicitadas.pesos_g,\n      medidasCandidato.pesos_g,\n      conflitos,\n      atributosNaoConfirmados\n    );\n\n    verificarMedidaObrigatoria(\n      'dimensão',\n      medidasSolicitadas.comprimentos_mm,\n      medidasCandidato.comprimentos_mm,\n      conflitos,\n      atributosNaoConfirmados\n    );\n\n    verificarMedidaObrigatoria(\n      'concentração',\n      medidasSolicitadas.percentuais,\n      medidasCandidato.percentuais,\n      conflitos,\n      atributosNaoConfirmados\n    );\n\n    verificarMedidaObrigatoria(\n      'voltagem',\n      medidasSolicitadas.voltagens,\n      medidasCandidato.voltagens,\n      conflitos,\n      atributosNaoConfirmados\n    );\n\n    const tipoPilhaCandidato =\n      detectarTipoPilha(descricaoCandidato);\n\n    if (\n      tipoPilhaSolicitado &&\n      tipoPilhaCandidato &&\n      tipoPilhaSolicitado !== tipoPilhaCandidato\n    ) {\n      conflitos.push(\n        `tipo de pilha incompatível: solicitado ${tipoPilhaSolicitado}; candidato ${tipoPilhaCandidato}`\n      );\n    }\n\n    if (\n      tipoPilhaSolicitado &&\n      !tipoPilhaCandidato\n    ) {\n      atributosNaoConfirmados.push(\n        `tipo de pilha ${tipoPilhaSolicitado} não confirmado`\n      );\n    }\n\n    const folhaCandidato =\n      detectarFolha(descricaoCandidato);\n\n    if (\n      folhaSolicitada &&\n      folhaCandidato &&\n      folhaSolicitada !== folhaCandidato\n    ) {\n      conflitos.push(\n        `tipo de folha incompatível: solicitado ${folhaSolicitada}; candidato ${folhaCandidato}`\n      );\n    }\n\n    if (\n      folhaSolicitada &&\n      !folhaCandidato\n    ) {\n      atributosNaoConfirmados.push(\n        `tipo de folha ${folhaSolicitada} não confirmado`\n      );\n    }\n\n    const pffCandidato =\n      detectarPff(descricaoCandidato);\n\n    if (\n      pffSolicitado &&\n      pffCandidato &&\n      pffSolicitado !== pffCandidato\n    ) {\n      conflitos.push(\n        `classe incompatível: solicitado ${pffSolicitado}; candidato ${pffCandidato}`\n      );\n    }\n\n    if (\n      pffSolicitado &&\n      !pffCandidato\n    ) {\n      atributosNaoConfirmados.push(\n        `classe ${pffSolicitado} não confirmada`\n      );\n    }\n\n    const grampoCandidato =\n      detectarTamanhoGrampo(\n        descricaoCandidato\n      );\n\n    if (\n      grampoSolicitado &&\n      grampoCandidato &&\n      grampoSolicitado !== grampoCandidato\n    ) {\n      conflitos.push(\n        `tamanho incompatível: solicitado ${grampoSolicitado}; candidato ${grampoCandidato}`\n      );\n    }\n\n    if (\n      grampoSolicitado &&\n      !grampoCandidato\n    ) {\n      atributosNaoConfirmados.push(\n        `tamanho ${grampoSolicitado} não confirmado`\n      );\n    }\n\n    const quantidadeEmbalagemCandidato =\n      detectarQuantidadeEmbalagem(\n        descricaoCandidato\n      );\n\n    /*\n     * Embalagem diferente não elimina o produto.\n     * Apenas registra a diferença para cálculo posterior.\n     */\n    if (\n      quantidadeEmbalagemSolicitada &&\n      quantidadeEmbalagemCandidato &&\n      quantidadeEmbalagemSolicitada !==\n        quantidadeEmbalagemCandidato\n    ) {\n      atributosNaoConfirmados.push(\n        `embalagem diferente: solicitado ${quantidadeEmbalagemSolicitada} unidade(s); candidato contém ${quantidadeEmbalagemCandidato} unidade(s)`\n      );\n    }\n\n    if (\n      quantidadeEmbalagemSolicitada &&\n      !quantidadeEmbalagemCandidato\n    ) {\n      atributosNaoConfirmados.push(\n        `quantidade por embalagem ${quantidadeEmbalagemSolicitada} não confirmada`\n      );\n    }\n\n    const quantidadePacotesNecessarios =\n      quantidadeEmbalagemCandidato &&\n      quantidadeSolicitada > 0\n        ? Math.ceil(\n            quantidadeSolicitada /\n              quantidadeEmbalagemCandidato\n          )\n        : null;\n\n    const quantidadeTotalFornecida =\n      quantidadePacotesNecessarios &&\n      quantidadeEmbalagemCandidato\n        ? quantidadePacotesNecessarios *\n          quantidadeEmbalagemCandidato\n        : null;\n\n    const quantidadeExcedente =\n      quantidadeTotalFornecida !== null &&\n      quantidadeSolicitada > 0\n        ? quantidadeTotalFornecida -\n          quantidadeSolicitada\n        : null;\n\n    const digitosCalculadoraCandidato =\n      detectarDigitosCalculadora(\n        descricaoCandidato\n      );\n\n    if (\n      digitosCalculadoraSolicitada &&\n      digitosCalculadoraCandidato &&\n      digitosCalculadoraSolicitada !==\n        digitosCalculadoraCandidato\n    ) {\n      conflitos.push(\n        `quantidade de dígitos incompatível: solicitado ${digitosCalculadoraSolicitada}; candidato ${digitosCalculadoraCandidato}`\n      );\n    }\n\n    if (\n      digitosCalculadoraSolicitada &&\n      !digitosCalculadoraCandidato\n    ) {\n      atributosNaoConfirmados.push(\n        `${digitosCalculadoraSolicitada} dígitos não confirmados`\n      );\n    }\n\n    const tamanhoReguaCandidato =\n      detectarTamanhoRegua(\n        descricaoCandidato\n      );\n\n    if (\n      tamanhoReguaSolicitado &&\n      tamanhoReguaCandidato &&\n      tamanhoReguaSolicitado !==\n        tamanhoReguaCandidato\n    ) {\n      conflitos.push(\n        `tamanho da régua incompatível: solicitado ${tamanhoReguaSolicitado}CM; candidato ${tamanhoReguaCandidato}CM`\n      );\n    }\n\n    const candidatoEhPortaPapel =\n      detectarProdutoPortaPapel(\n        descricaoCandidato\n      );\n\n    if (\n      !solicitadoEhPortaPapel &&\n      candidatoEhPortaPapel &&\n      (\n        descricaoSolicitada.includes(\n          'PAPEL HIGIENICO'\n        ) ||\n        descricaoSolicitada.includes(\n          'PAPEL TOALHA'\n        )\n      )\n    ) {\n      conflitos.push(\n        'finalidade incompatível: solicitado papel; candidato é porta-papel'\n      );\n    }\n\n    const candidatoEhMarcaTexto =\n      detectarMarcaTexto(\n        descricaoCandidato\n      );\n\n    const candidatoEhMarcadorCd =\n      detectarMarcadorCd(\n        descricaoCandidato\n      );\n\n    if (\n      solicitadoEhMarcaTexto &&\n      candidatoEhMarcadorCd\n    ) {\n      conflitos.push(\n        'finalidade incompatível: solicitado marca-texto; candidato é marcador para CD/DVD'\n      );\n    }\n\n    if (\n      solicitadoEhMarcadorCd &&\n      candidatoEhMarcaTexto\n    ) {\n      conflitos.push(\n        'finalidade incompatível: solicitado marcador para CD/DVD; candidato é marca-texto'\n      );\n    }\n\n    const candidatoEhLapis =\n      detectarLapis(descricaoCandidato);\n\n    const candidatoEhLapiseira =\n      detectarLapiseira(\n        descricaoCandidato\n      );\n\n    if (\n      solicitadoEhLapis &&\n      candidatoEhLapiseira\n    ) {\n      conflitos.push(\n        'tipo incompatível: solicitado lápis; candidato é lapiseira'\n      );\n    }\n\n    if (\n      solicitadoEhLapiseira &&\n      candidatoEhLapis\n    ) {\n      conflitos.push(\n        'tipo incompatível: solicitado lapiseira; candidato é lápis'\n      );\n    }\n\n    const candidatoEhColaBastao =\n      detectarColaBastao(\n        descricaoCandidato\n      );\n\n    const candidatoEhPapelEscolar =\n      detectarPapelEscolar(\n        descricaoCandidato\n      );\n\n    if (\n      solicitadoEhColaBastao &&\n      candidatoEhPapelEscolar\n    ) {\n      conflitos.push(\n        'tipo incompatível: solicitado cola bastão; candidato é papel escolar'\n      );\n    }\n\n    if (\n      solicitadoEhPapelEscolar &&\n      candidatoEhColaBastao\n    ) {\n      conflitos.push(\n        'tipo incompatível: solicitado papel escolar; candidato é cola bastão'\n      );\n    }\n\n    return {\n      ...candidato,\n\n      quantidade_embalagem_candidato:\n        quantidadeEmbalagemCandidato,\n\n      quantidade_pacotes_necessarios:\n        quantidadePacotesNecessarios,\n\n      quantidade_total_fornecida:\n        quantidadeTotalFornecida,\n\n      quantidade_excedente:\n        quantidadeExcedente,\n\n      compativel:\n        conflitos.length === 0,\n\n      possui_conflito:\n        conflitos.length > 0,\n\n      conflitos,\n\n      atributos_nao_confirmados:\n        atributosNaoConfirmados,\n\n      quantidade_conflitos:\n        conflitos.length,\n\n      quantidade_nao_confirmados:\n        atributosNaoConfirmados.length,\n    };\n  }\n);\n\nconst candidatosCompativeis =\n  candidatosValidados\n    .filter(candidato => candidato.compativel)\n    .sort((a, b) => {\n      /*\n       * Primeiro, candidatos com menos atributos\n       * não confirmados.\n       */\n      if (\n        a.quantidade_nao_confirmados !==\n        b.quantidade_nao_confirmados\n      ) {\n        return (\n          a.quantidade_nao_confirmados -\n          b.quantidade_nao_confirmados\n        );\n      }\n\n      /*\n       * Depois, menor excedente de embalagem.\n       */\n      const excedenteA =\n        a.quantidade_excedente ?? 999999;\n\n      const excedenteB =\n        b.quantidade_excedente ?? 999999;\n\n      if (excedenteA !== excedenteB) {\n        return excedenteA - excedenteB;\n      }\n\n      if (\n        b.pontos_termos !==\n        a.pontos_termos\n      ) {\n        return (\n          b.pontos_termos -\n          a.pontos_termos\n        );\n      }\n\n      return (\n        b.similaridade -\n        a.similaridade\n      );\n    });\n\nconst candidatosRejeitados =\n  candidatosValidados.filter(\n    candidato => !candidato.compativel\n  );\n\nreturn {\n  ...$json,\n\n  candidatos_originais:\n    candidatos.length,\n\n  candidatos_compativeis:\n    candidatosCompativeis,\n\n  candidatos_rejeitados:\n    candidatosRejeitados,\n\n  quantidade_compativeis:\n    candidatosCompativeis.length,\n\n  quantidade_rejeitados:\n    candidatosRejeitados.length,\n\n  nenhum_candidato_compativel:\n    candidatosCompativeis.length === 0,\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -752,
+        208
+      ],
+      "id": "39b917c3-36c8-48a1-b686-638c37cbea43",
+      "name": "Validar compatibilidade dos candidatos"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function numeroSeguro(valor, padrao = 0) {\n  const numero = Number(valor);\n\n  return Number.isFinite(numero)\n    ? numero\n    : padrao;\n}\n\nfunction textoOuNull(valor) {\n  const texto = String(valor ?? '').trim();\n\n  return texto || null;\n}\n\nfunction listaSegura(valor) {\n  return Array.isArray(valor)\n    ? valor\n        .map(item => String(item ?? '').trim())\n        .filter(Boolean)\n    : [];\n}\n\nconst candidatosCompativeis =\n  Array.isArray($json.candidatos_compativeis)\n    ? $json.candidatos_compativeis\n    : [];\n\n/*\n * Mantemos todos os candidatos compatíveis recuperados pelo\n * Oracle, até o limite atual de 50.\n *\n * Não usamos somente os primeiros, porque em alguns itens o\n * produto semanticamente correto aparece depois de candidatos\n * com pontuação textual artificialmente mais alta.\n */\nconst candidatosParaIa =\n  candidatosCompativeis\n    .slice(0, 50)\n    .map((candidato, indice) => ({\n      posicao_previa: indice + 1,\n\n      codigo:\n        candidato.codigo === null ||\n        candidato.codigo === undefined\n          ? null\n          : String(candidato.codigo),\n\n      descricao:\n        String(candidato.descricao || '').trim(),\n\n      pontos_termos:\n        numeroSeguro(candidato.pontos_termos),\n\n      similaridade:\n        numeroSeguro(candidato.similaridade),\n\n      atributos_nao_confirmados:\n        listaSegura(\n          candidato.atributos_nao_confirmados\n        ),\n\n      quantidade_embalagem_candidato:\n        candidato.quantidade_embalagem_candidato\n          ?? null,\n\n      quantidade_pacotes_necessarios:\n        candidato.quantidade_pacotes_necessarios\n          ?? null,\n\n      quantidade_total_fornecida:\n        candidato.quantidade_total_fornecida\n          ?? null,\n\n      quantidade_excedente:\n        candidato.quantidade_excedente\n          ?? null,\n    }))\n    .filter(candidato =>\n      candidato.codigo &&\n      candidato.descricao\n    );\n\nconst solicitacaoParaIa = {\n  item:\n    $json.item ?? null,\n\n  codigo_cliente:\n    textoOuNull($json.codigo_cliente),\n\n  descricao_original:\n    String($json.descricao_original || '').trim(),\n\n  produto_base:\n    textoOuNull(\n      $json.produto_base_normalizado ||\n      $json.produto_base\n    ),\n\n  quantidade_solicitada:\n    $json.quantidade ?? null,\n\n  unidade_solicitada:\n    textoOuNull(\n      $json.unidade_normalizada ||\n      $json.unidade\n    ),\n\n  ncm:\n    textoOuNull($json.ncm),\n\n  volume:\n    textoOuNull($json.volume),\n\n  peso:\n    textoOuNull($json.peso),\n\n  dimensoes:\n    textoOuNull($json.dimensoes),\n\n  concentracao:\n    textoOuNull($json.concentracao),\n\n  cor:\n    textoOuNull($json.cor),\n\n  material:\n    textoOuNull($json.material),\n\n  marca:\n    textoOuNull($json.marca),\n\n  modelo:\n    textoOuNull($json.modelo),\n\n  quantidade_embalagem_solicitada:\n    $json.quantidade_embalagem ?? null,\n\n  atributos:\n    listaSegura($json.atributos),\n\n  medidas_encontradas:\n    listaSegura($json.medidas_encontradas),\n};\n\nreturn {\n  numero_pedido:\n    $json.numero_pedido ?? null,\n\n  cliente:\n    $json.cliente ?? null,\n\n  data_emissao:\n    $json.data_emissao ?? null,\n\n  item:\n    $json.item ?? null,\n\n  codigo_cliente:\n    $json.codigo_cliente ?? null,\n\n  descricao_original:\n    $json.descricao_original ?? '',\n\n  quantidade:\n    $json.quantidade ?? null,\n\n  unidade:\n    $json.unidade ?? null,\n\n  unidade_normalizada:\n    $json.unidade_normalizada ?? null,\n\n  ncm:\n    $json.ncm ?? null,\n\n  solicitacao_para_ia:\n    solicitacaoParaIa,\n\n  total_candidatos_oracle:\n    numeroSeguro(\n      $json.candidatos_originais ||\n      $json.quantidade_candidatos\n    ),\n\n  total_candidatos_rejeitados:\n    numeroSeguro(\n      $json.quantidade_rejeitados\n    ),\n\n  total_candidatos_para_ia:\n    candidatosParaIa.length,\n\n  candidatos_para_ia:\n    candidatosParaIa,\n\n  sem_candidatos_para_ia:\n    candidatosParaIa.length === 0,\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -544,
+        208
+      ],
+      "id": "e9ea5288-fc96-4a57-9a9b-ba0ad751728b",
+      "name": "Preparar candidatos para IA"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "156f5719-d84c-45ae-b619-18b7c883c59c",
+              "leftValue": "={{ Number($json.total_candidatos_para_ia || 0) }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -336,
+        208
+      ],
+      "id": "e58f3470-f99e-41b0-8a9e-b5526a794158",
+      "name": "Tem candidatos para IA?"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        -128,
+        112
+      ],
+      "id": "497a7280-2ed3-4d96-b77b-ac9299ffe4ee",
+      "name": "Avaliar candidatos com IA",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function norm(v) {\n  return String(v ?? '')\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '')\n    .toUpperCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction lista(v) {\n  if (!Array.isArray(v)) return [];\n\n  return [\n    ...new Set(\n      v\n        .map(x => String(x ?? '').trim())\n        .filter(Boolean)\n    ),\n  ];\n}\n\nfunction inteiro(v, min = 0, max = 100) {\n  const n = Number(v);\n\n  return Number.isFinite(n)\n    ? Math.min(\n        max,\n        Math.max(min, Math.round(n))\n      )\n    : min;\n}\n\nfunction textoIa(entrada) {\n  if (\n    typeof entrada?.output_text === 'string'\n  ) {\n    return entrada.output_text.trim();\n  }\n\n  if (typeof entrada?.text === 'string') {\n    return entrada.text.trim();\n  }\n\n  if (\n    typeof entrada?.message?.content === 'string'\n  ) {\n    return entrada.message.content.trim();\n  }\n\n  for (const bloco of entrada?.output || []) {\n    for (const conteudo of bloco?.content || []) {\n      if (\n        typeof conteudo?.text === 'string' &&\n        conteudo.text.trim()\n      ) {\n        return conteudo.text.trim();\n      }\n    }\n  }\n\n  return '';\n}\n\nfunction limparJson(v) {\n  return String(v || '')\n    .replace(/^```json\\s*/i, '')\n    .replace(/^```\\s*/i, '')\n    .replace(/```$/i, '')\n    .trim();\n}\n\nfunction conflitoExplicito(motivo) {\n  let v = norm(motivo)\n    .replace(\n      /SEM INCOMPATIBILIDADE EXPLICITA/g,\n      ''\n    )\n    .replace(\n      /SEM INCOMPATIBILIDADE/g,\n      ''\n    )\n    .replace(\n      /NAO HA INCOMPATIBILIDADE EXPLICITA/g,\n      ''\n    )\n    .replace(\n      /NAO HA INCOMPATIBILIDADE/g,\n      ''\n    );\n\n  return [\n    /\\bCONFLIT/,\n    /\\bINCOMPATIVEL/,\n    /NAO CORRESPONDE/,\n    /NAO ATENDE/,\n    /FINALIDADE DIFERENTE/,\n    /CATEGORIA DIFERENTE/,\n    /PRODUTO ACESSORIO/,\n    /TIPO DIFERENTE/,\n    /TAMANHO DIFERENTE/,\n    /MEDIDA DIFERENTE/,\n  ].some(r => r.test(v));\n}\n\nfunction resumo(c, posicao) {\n  if (!c) return null;\n\n  return {\n    codigo:\n      String(c.codigo),\n\n    descricao:\n      String(c.descricao || '').trim(),\n\n    posicao_previa:\n      posicao,\n\n    pontos_termos:\n      Number(c.pontos_termos || 0),\n\n    similaridade:\n      Number(c.similaridade || 0),\n\n    atributos_nao_confirmados_deterministicos:\n      lista(c.atributos_nao_confirmados),\n\n    quantidade_embalagem_candidato:\n      c.quantidade_embalagem_candidato ?? null,\n\n    quantidade_pacotes_necessarios:\n      c.quantidade_pacotes_necessarios ?? null,\n\n    quantidade_total_fornecida:\n      c.quantidade_total_fornecida ?? null,\n\n    quantidade_excedente:\n      c.quantidade_excedente ?? null,\n  };\n}\n\n/*\n * Extrai e interpreta a resposta do nó OpenAI.\n */\nconst bruto = textoIa($json);\n\nlet decisao = null;\nlet erroParse = null;\n\ntry {\n  decisao = JSON.parse(\n    limparJson(bruto)\n  );\n} catch (e) {\n  erroParse = bruto\n    ? `JSON inválido retornado pela IA: ${e.message}`\n    : 'Resposta textual da IA não encontrada.';\n}\n\n/*\n * Recupera o item que foi enviado para a IA.\n */\nlet origem = null;\n\ntry {\n  origem =\n    $('Preparar candidatos para IA').item.json;\n} catch (e) {\n  // Usa o fallback abaixo.\n}\n\n/*\n * Fallback para quando o pareamento automático\n * entre os itens não estiver disponível.\n */\nif (\n  (!origem || !origem.item) &&\n  decisao?.item != null\n) {\n  origem =\n    $('Preparar candidatos para IA')\n      .all()\n      .map(i => i.json)\n      .find(i =>\n        Number(i.item) ===\n        Number(decisao.item)\n      ) || null;\n}\n\nif (!origem) {\n  throw new Error(\n    'Item original não encontrado no nó \"Preparar candidatos para IA\".'\n  );\n}\n\nconst base = {\n  numero_pedido:\n    origem.numero_pedido ?? null,\n\n  cliente:\n    origem.cliente ?? null,\n\n  data_emissao:\n    origem.data_emissao ?? null,\n\n  item:\n    origem.item ?? null,\n\n  codigo_cliente:\n    origem.codigo_cliente ?? null,\n\n  descricao_original:\n    origem.descricao_original ?? '',\n\n  quantidade:\n    origem.quantidade ?? null,\n\n  unidade:\n    origem.unidade ?? null,\n\n  unidade_normalizada:\n    origem.unidade_normalizada ?? null,\n\n  ncm:\n    origem.ncm ?? null,\n\n  total_candidatos_oracle:\n    Number(\n      origem.total_candidatos_oracle || 0\n    ),\n\n  total_candidatos_para_ia:\n    Number(\n      origem.total_candidatos_para_ia || 0\n    ),\n};\n\n/*\n * Não interrompe o workflow caso a IA retorne\n * texto vazio ou JSON inválido.\n */\nif (\n  erroParse ||\n  !decisao ||\n  typeof decisao !== 'object'\n) {\n  return {\n    ...base,\n\n    status_ia:\n      null,\n\n    status_final:\n      'ERRO_IA',\n\n    codigo_produto_selecionado:\n      null,\n\n    descricao_produto_selecionado:\n      null,\n\n    posicao_previa:\n      null,\n\n    confianca_ia:\n      0,\n\n    motivo_ia:\n      erroParse,\n\n    atributos_confirmados:\n      [],\n\n    atributos_nao_confirmados:\n      [],\n\n    candidato_selecionado:\n      null,\n\n    alternativas:\n      [],\n\n    alternativas_descartadas:\n      [],\n\n    validacao_ia_ok:\n      false,\n\n    status_processamento:\n      'ERRO_IA',\n\n    necessita_reprocessar_ia:\n      true,\n\n    erros_validacao: [\n      erroParse,\n    ],\n\n    avisos_validacao:\n      [],\n\n    resposta_ia_bruta:\n      bruto || null,\n  };\n}\n\nconst erros = [];\nconst avisos = [];\n\nconst permitidos = new Set([\n  'APROVADO',\n  'REVISAR',\n  'SEM_CORRESPONDENCIA',\n]);\n\nconst statusIa =\n  norm(decisao.status);\n\nlet confianca =\n  inteiro(decisao.confianca);\n\nif (!permitidos.has(statusIa)) {\n  erros.push(\n    `Status inválido: ${\n      decisao.status ?? 'vazio'\n    }.`\n  );\n}\n\nif (\n  Number(decisao.item) !==\n  Number(origem.item)\n) {\n  erros.push(\n    `Item divergente: origem ${origem.item}; IA ${decisao.item}.`\n  );\n}\n\n/*\n * Cria um mapa dos únicos códigos que\n * a IA tinha permissão de selecionar.\n */\nconst candidatos = Array.isArray(\n  origem.candidatos_para_ia\n)\n  ? origem.candidatos_para_ia\n  : [];\n\nconst mapa = new Map(\n  candidatos.map(\n    (candidato, indice) => [\n      String(candidato.codigo),\n      {\n        candidato,\n        posicao: indice + 1,\n      },\n    ]\n  )\n);\n\nlet codigo =\n  decisao.codigo_selecionado == null\n    ? null\n    : String(\n        decisao.codigo_selecionado\n      ).trim();\n\nlet selecionado =\n  codigo\n    ? mapa.get(codigo)\n    : null;\n\n/*\n * SEM_CORRESPONDENCIA nunca pode\n * carregar um produto selecionado.\n */\nif (\n  statusIa === 'SEM_CORRESPONDENCIA'\n) {\n  if (\n    codigo ||\n    decisao.descricao_selecionada ||\n    decisao.posicao_previa != null\n  ) {\n    avisos.push(\n      'Seleção removida porque o status é SEM_CORRESPONDENCIA.'\n    );\n  }\n\n  codigo = null;\n  selecionado = null;\n} else {\n  if (!codigo) {\n    erros.push(\n      'APROVADO/REVISAR sem código selecionado.'\n    );\n  } else if (!selecionado) {\n    erros.push(\n      `Código ${codigo} não existe em candidatos_para_ia.`\n    );\n  }\n}\n\n/*\n * A descrição e a posição finais passam a\n * vir do candidato real, e não do texto da IA.\n */\nif (selecionado) {\n  const descricaoBanco =\n    String(\n      selecionado.candidato.descricao || ''\n    ).trim();\n\n  if (\n    String(\n      decisao.descricao_selecionada || ''\n    ).trim() !== descricaoBanco\n  ) {\n    avisos.push(\n      'Descrição corrigida para o texto exato do banco.'\n    );\n  }\n\n  if (\n    Number(decisao.posicao_previa) !==\n    selecionado.posicao\n  ) {\n    avisos.push(\n      `Posição corrigida para ${selecionado.posicao}.`\n    );\n  }\n}\n\nconst confirmados =\n  lista(decisao.atributos_confirmados);\n\nconst naoConfirmados =\n  lista([\n    ...lista(\n      decisao.atributos_nao_confirmados\n    ),\n\n    ...lista(\n      selecionado\n        ?.candidato\n        ?.atributos_nao_confirmados\n    ),\n  ]);\n\nlet statusFinal =\n  permitidos.has(statusIa)\n    ? statusIa\n    : 'ERRO_IA';\n\n/*\n * A IA não pode aprovar automaticamente\n * um candidato com baixa confiança ou\n * atributos ainda não confirmados.\n */\nif (\n  statusFinal === 'APROVADO' &&\n  (\n    confianca < 90 ||\n    naoConfirmados.length > 0\n  )\n) {\n  statusFinal = 'REVISAR';\n\n  avisos.push(\n    'APROVADO rebaixado para REVISAR por confiança baixa ou atributos não confirmados.'\n  );\n}\n\n/*\n * Uma decisão abaixo de 60 não pode manter\n * um produto selecionado.\n */\nif (\n  statusFinal === 'REVISAR' &&\n  confianca < 60\n) {\n  statusFinal =\n    'SEM_CORRESPONDENCIA';\n\n  codigo = null;\n  selecionado = null;\n\n  avisos.push(\n    'REVISAR rebaixado para SEM_CORRESPONDENCIA por confiança inferior a 60.'\n  );\n}\n\nif (\n  statusFinal ===\n  'SEM_CORRESPONDENCIA'\n) {\n  confianca =\n    Math.min(confianca, 59);\n\n  codigo = null;\n  selecionado = null;\n}\n\n/*\n * Código inventado, status inválido ou item\n * divergente gera ERRO_IA.\n */\nif (erros.length > 0) {\n  statusFinal =\n    'ERRO_IA';\n\n  codigo = null;\n  selecionado = null;\n}\n\n/*\n * Valida e higieniza as alternativas.\n */\nconst alternativas = [];\nconst descartadas = [];\nconst usados = new Set();\n\nfor (\n  const alt of (\n    Array.isArray(decisao.alternativas)\n      ? decisao.alternativas\n      : []\n  )\n) {\n  if (alternativas.length >= 2) {\n    break;\n  }\n\n  const cod =\n    alt?.codigo == null\n      ? ''\n      : String(alt.codigo).trim();\n\n  const motivo =\n    String(alt?.motivo || '').trim();\n\n  const reg =\n    mapa.get(cod);\n\n  if (!cod || !reg) {\n    descartadas.push({\n      codigo:\n        cod || null,\n\n      descricao:\n        alt?.descricao ?? null,\n\n      motivo_descarte:\n        'Código não existe em candidatos_para_ia.',\n    });\n\n    continue;\n  }\n\n  if (\n    codigo &&\n    cod === codigo\n  ) {\n    descartadas.push({\n      codigo:\n        cod,\n\n      descricao:\n        reg.candidato.descricao,\n\n      motivo_descarte:\n        'Alternativa igual ao selecionado.',\n    });\n\n    continue;\n  }\n\n  if (usados.has(cod)) {\n    continue;\n  }\n\n  /*\n   * Descarta alternativas cujo próprio motivo\n   * admite conflito ou incompatibilidade.\n   */\n  if (\n    conflitoExplicito(motivo)\n  ) {\n    descartadas.push({\n      codigo:\n        cod,\n\n      descricao:\n        reg.candidato.descricao,\n\n      motivo_descarte:\n        'O motivo da IA indica incompatibilidade explícita.',\n\n      motivo_ia:\n        motivo,\n    });\n\n    continue;\n  }\n\n  usados.add(cod);\n\n  alternativas.push({\n    ...resumo(\n      reg.candidato,\n      reg.posicao\n    ),\n\n    motivo,\n  });\n}\n\nif (descartadas.length > 0) {\n  avisos.push(\n    `${descartadas.length} alternativa(s) descartada(s) por código inválido, duplicidade ou conflito explícito.`\n  );\n}\n\nconst candidatoSelecionado =\n  selecionado\n    ? resumo(\n        selecionado.candidato,\n        selecionado.posicao\n      )\n    : null;\n\nreturn {\n  ...base,\n\n  status_ia:\n    statusIa || null,\n\n  status_final:\n    statusFinal,\n\n  codigo_produto_selecionado:\n    candidatoSelecionado\n      ?.codigo ?? null,\n\n  descricao_produto_selecionado:\n    candidatoSelecionado\n      ?.descricao ?? null,\n\n  posicao_previa:\n    candidatoSelecionado\n      ?.posicao_previa ?? null,\n\n  confianca_ia:\n    confianca,\n\n  motivo_ia:\n    String(\n      decisao.motivo || ''\n    ).trim(),\n\n  atributos_confirmados:\n    confirmados,\n\n  atributos_nao_confirmados:\n    naoConfirmados,\n\n  candidato_selecionado:\n    candidatoSelecionado,\n\n  alternativas,\n\n  alternativas_descartadas:\n    descartadas,\n\n  validacao_ia_ok:\n    erros.length === 0,\n\n  status_processamento:\n    erros.length\n      ? 'ERRO_IA'\n      : avisos.length\n        ? 'VALIDADO_COM_AJUSTES'\n        : 'VALIDADO',\n\n  necessita_reprocessar_ia:\n    erros.length > 0,\n\n  erros_validacao:\n    erros,\n\n  avisos_validacao:\n    avisos,\n\n  resposta_ia_bruta:\n    bruto,\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        112
+      ],
+      "id": "df4c4fb5-f177-49b2-bfd4-f49a2a23c2dc",
+      "name": "Validar decisão da IA"
+    },
+    {
+      "parameters": {
+        "jsCode": "function textoOuNull(valor) {\n  const texto = String(valor ?? '').trim();\n\n  return texto || null;\n}\n\nfunction numeroSeguro(valor) {\n  const numero = Number(valor);\n\n  return Number.isFinite(numero)\n    ? numero\n    : 0;\n}\n\nfunction listarAtributosSolicitados(solicitacao) {\n  const atributos = [];\n\n  function adicionar(rotulo, valor) {\n    const texto = textoOuNull(valor);\n\n    if (texto) {\n      atributos.push(`${rotulo}: ${texto}`);\n    }\n  }\n\n  adicionar(\n    'produto',\n    solicitacao.produto_base\n  );\n\n  adicionar(\n    'volume',\n    solicitacao.volume\n  );\n\n  adicionar(\n    'peso',\n    solicitacao.peso\n  );\n\n  adicionar(\n    'dimensões',\n    solicitacao.dimensoes\n  );\n\n  adicionar(\n    'concentração',\n    solicitacao.concentracao\n  );\n\n  adicionar(\n    'cor',\n    solicitacao.cor\n  );\n\n  adicionar(\n    'material',\n    solicitacao.material\n  );\n\n  adicionar(\n    'marca',\n    solicitacao.marca\n  );\n\n  adicionar(\n    'modelo',\n    solicitacao.modelo\n  );\n\n  if (\n    solicitacao.quantidade_embalagem_solicitada !==\n      null &&\n    solicitacao.quantidade_embalagem_solicitada !==\n      undefined\n  ) {\n    adicionar(\n      'quantidade por embalagem',\n      solicitacao.quantidade_embalagem_solicitada\n    );\n  }\n\n  const atributosOriginais =\n    Array.isArray(solicitacao.atributos)\n      ? solicitacao.atributos\n      : [];\n\n  for (const atributo of atributosOriginais) {\n    adicionar(\n      'atributo',\n      atributo\n    );\n  }\n\n  return [\n    ...new Set(atributos),\n  ];\n}\n\nconst solicitacao =\n  $json.solicitacao_para_ia &&\n  typeof $json.solicitacao_para_ia === 'object'\n    ? $json.solicitacao_para_ia\n    : {};\n\nconst totalOracle =\n  numeroSeguro(\n    $json.total_candidatos_oracle\n  );\n\nconst totalRejeitados =\n  numeroSeguro(\n    $json.total_candidatos_rejeitados\n  );\n\nlet motivo;\n\nif (totalOracle === 0) {\n  motivo =\n    'Nenhum produto candidato foi encontrado no banco de dados para este item.';\n} else if (\n  totalRejeitados >= totalOracle\n) {\n  motivo =\n    `Foram encontrados ${totalOracle} candidato(s), mas todos foram rejeitados pelas validações objetivas de compatibilidade.`;\n} else {\n  motivo =\n    'Nenhum candidato suficientemente compatível permaneceu disponível para avaliação semântica.';\n}\n\nreturn {\n  numero_pedido:\n    $json.numero_pedido ?? null,\n\n  cliente:\n    $json.cliente ?? null,\n\n  data_emissao:\n    $json.data_emissao ?? null,\n\n  item:\n    $json.item ?? null,\n\n  codigo_cliente:\n    $json.codigo_cliente ?? null,\n\n  descricao_original:\n    $json.descricao_original ?? '',\n\n  quantidade:\n    $json.quantidade ?? null,\n\n  unidade:\n    $json.unidade ?? null,\n\n  unidade_normalizada:\n    $json.unidade_normalizada ?? null,\n\n  ncm:\n    $json.ncm ?? null,\n\n  total_candidatos_oracle:\n    totalOracle,\n\n  total_candidatos_rejeitados:\n    totalRejeitados,\n\n  total_candidatos_para_ia:\n    0,\n\n  status_ia:\n    null,\n\n  status_final:\n    'SEM_CORRESPONDENCIA',\n\n  codigo_produto_selecionado:\n    null,\n\n  descricao_produto_selecionado:\n    null,\n\n  posicao_previa:\n    null,\n\n  confianca_ia:\n    0,\n\n  motivo_ia:\n    motivo,\n\n  motivo_final:\n    motivo,\n\n  atributos_confirmados:\n    [],\n\n  atributos_nao_confirmados:\n    listarAtributosSolicitados(\n      solicitacao\n    ),\n\n  candidato_selecionado:\n    null,\n\n  alternativas:\n    [],\n\n  alternativas_descartadas:\n    [],\n\n  validacao_ia_ok:\n    null,\n\n  origem_decisao:\n    'REGRA_SEM_CANDIDATO',\n\n  status_processamento:\n    'SEM_CANDIDATO_PARA_IA',\n\n  necessita_reprocessar_ia:\n    false,\n\n  erros_validacao:\n    [],\n\n  avisos_validacao: [\n    motivo,\n  ],\n\n  resposta_ia_bruta:\n    null,\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        304
+      ],
+      "id": "54d252b3-b5d3-44b3-ac59-e0cb8f0679e4",
+      "name": "Registrar item sem candidato"
+    },
+    {
+      "parameters": {
+        "jsCode": "function texto(valor) {\n  return String(valor ?? '').trim();\n}\n\nfunction listaTexto(valor) {\n  if (!Array.isArray(valor)) {\n    return '';\n  }\n\n  return valor\n    .map(item => String(item ?? '').trim())\n    .filter(Boolean)\n    .join(' | ');\n}\n\nfunction primeiraAlternativa(item) {\n  return Array.isArray(item.alternativas) &&\n    item.alternativas.length > 0\n      ? item.alternativas[0]\n      : null;\n}\n\nconst linhas = $input.all()\n  .map(item => item.json)\n  .sort((a, b) => Number(a.item || 0) - Number(b.item || 0))\n  .map(item => {\n    const temSelecionado =\n      item.codigo_produto_selecionado &&\n      item.descricao_produto_selecionado;\n\n    const alternativa =\n      primeiraAlternativa(item);\n\n    const codigoConferencia = temSelecionado\n      ? item.codigo_produto_selecionado\n      : alternativa?.codigo ?? null;\n\n    const descricaoConferencia = temSelecionado\n      ? item.descricao_produto_selecionado\n      : alternativa?.descricao ?? null;\n\n    const origemOpcao = temSelecionado\n      ? 'CANDIDATO_SELECIONADO_IA'\n      : alternativa\n        ? 'SEGUNDA_OPCAO_IA'\n        : 'SEM_OPCAO';\n\n    return {\n      json: {\n        pedido: item.numero_pedido ?? '',\n        cliente: item.cliente ?? '',\n        data_emissao: item.data_emissao ?? '',\n\n        item: item.item ?? '',\n        codigo_cliente: item.codigo_cliente ?? '',\n        descricao_solicitada_cliente: item.descricao_original ?? '',\n        quantidade_solicitada: item.quantidade ?? '',\n        unidade_solicitada: item.unidade_normalizada || item.unidade || '',\n        ncm: item.ncm ?? '',\n\n        status_ia: item.status_ia ?? '',\n        status_final: item.status_final ?? '',\n        confianca_ia: item.confianca_ia ?? '',\n\n        codigo_produto_para_conferencia: codigoConferencia ?? '',\n        descricao_produto_para_conferencia: descricaoConferencia ?? '',\n        origem_opcao_planilha: origemOpcao,\n\n        codigo_selecionado_ia: item.codigo_produto_selecionado ?? '',\n        descricao_selecionada_ia: item.descricao_produto_selecionado ?? '',\n\n        codigo_segunda_opcao: alternativa?.codigo ?? '',\n        descricao_segunda_opcao: alternativa?.descricao ?? '',\n        motivo_segunda_opcao: alternativa?.motivo ?? '',\n\n        motivo_ia: item.motivo_ia ?? '',\n        atributos_confirmados: listaTexto(item.atributos_confirmados),\n        atributos_nao_confirmados: listaTexto(item.atributos_nao_confirmados),\n\n        validacao_ia_ok: item.validacao_ia_ok ?? '',\n        status_processamento: item.status_processamento ?? '',\n        avisos_validacao: listaTexto(item.avisos_validacao),\n      },\n    };\n  });\n\nreturn linhas;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        112
+      ],
+      "id": "83b136a5-7b62-4f88-8029-1f0d1209ea69",
+      "name": "Montar planilha de conferência"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "fileName": "={{\n  'Conferencia_Pedido_' +\n  String(\n    $('Montar planilha de conferência')\n      .first()\n      .json\n      .pedido || 'sem_numero'\n  ) +\n  '.xlsx'\n}}"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        640,
+        112
+      ],
+      "id": "a2e04219-d1c5-4211-86a5-0d29fda7ecf1",
+      "name": "Gerar Excel de conferência"
+    },
+    {
+      "parameters": {
+        "content": "# Nota\n\nCópia de referência removida da versão pública. Consulte a documentação em `docs/`. "
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1104,
+        16
+      ],
+      "typeVersion": 1,
+      "id": "dfe9484a-9ce3-4ad7-9fe6-60a7806ae5f8",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Pega arquivo em base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File2": {
+      "main": [
+        [
+          {
+            "node": "Extract from File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pega arquivo em base": {
+      "main": [
+        [
+          {
+            "node": "Convert to File2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar itens do pedido": {
+      "main": [
+        [
+          {
+            "node": "Normalizar produto solicitado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar produto solicitado": {
+      "main": [
+        [
+          {
+            "node": "Preparar busca no banco",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar busca no banco": {
+      "main": [
+        [
+          {
+            "node": "Buscar candidatos no Oracle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar candidatos no Oracle": {
+      "main": [
+        [
+          {
+            "node": "Agrupar candidatos por item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agrupar candidatos por item": {
+      "main": [
+        [
+          {
+            "node": "Validar compatibilidade dos candidatos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar compatibilidade dos candidatos": {
+      "main": [
+        [
+          {
+            "node": "Preparar candidatos para IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar candidatos para IA": {
+      "main": [
+        [
+          {
+            "node": "Tem candidatos para IA?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem candidatos para IA?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Registrar item sem candidato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar decisão da IA": {
+      "main": [
+        [
+          {
+            "node": "Montar planilha de conferência",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar planilha de conferência": {
+      "main": [
+        [
+          {
+            "node": "Gerar Excel de conferência",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "xxxxxxxxxxxxxxxxxxxx"
+  }
+}
